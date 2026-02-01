@@ -1,0 +1,21 @@
+{
+  "manifestVersion": 1,
+  "pluginId": "ai.rever.boss.plugin.dynamic.rparecorder",
+  "displayName": "RPA Recorder (Dynamic)",
+  "version": "1.0.0",
+  "apiVersion": "1.0",
+  "mainClass": "ai.rever.boss.plugin.dynamic.rparecorder.RparecorderDynamicPlugin",
+  "type": "panel",
+  "description": "Record browser interactions for automation",
+  "author": "Risa Labs",
+  "url": "https://github.com/risa-labs-inc/boss-plugin-rparecorder",
+  "panel": {
+    "position": "right_top_top",
+    "priority": 19
+  },
+  "sandbox": {
+    "maxThreads": 4,
+    "maxRestartAttempts": 3,
+    "heartbeatIntervalMs": 5000
+  }
+}
