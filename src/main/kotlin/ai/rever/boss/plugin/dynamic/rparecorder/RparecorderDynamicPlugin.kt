@@ -11,7 +11,7 @@ import ai.rever.boss.plugin.api.PluginContext
 class RparecorderDynamicPlugin : DynamicPlugin {
     override val pluginId: String = "ai.rever.boss.plugin.dynamic.rparecorder"
     override val displayName: String = "RPA Recorder (Dynamic)"
-    override val version: String = "1.0.0"
+    override val version: String = "1.0.3"
     override val description: String = "Record browser interactions for automation"
     override val author: String = "Risa Labs"
     override val url: String = "https://github.com/risa-labs-inc/boss-plugin-rparecorder"
