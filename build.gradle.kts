@@ -2,12 +2,13 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     kotlin("jvm") version "2.3.0"
+    kotlin("plugin.serialization") version "2.3.0"
     id("org.jetbrains.compose") version "1.10.0"
     id("org.jetbrains.kotlin.plugin.compose") version "2.3.0"
 }
 
 group = "ai.rever.boss.plugin.dynamic"
-version = "1.0.1"
+version = "1.0.2"
 
 java {
     toolchain {
@@ -29,7 +30,7 @@ repositories {
 
 dependencies {
     // Plugin API from Maven Central
-    implementation("com.risaboss:plugin-api-desktop:1.0.4")
+    implementation("com.risaboss:plugin-api-desktop:1.0.5")
     implementation("com.risaboss:plugin-ui-core-desktop:1.0.4")
     implementation("com.risaboss:plugin-scrollbar-desktop:1.0.4")
     
@@ -47,6 +48,9 @@ dependencies {
     
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+
+    // Serialization for JSON
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
 }
 
 // Task to build plugin JAR with compiled classes only
