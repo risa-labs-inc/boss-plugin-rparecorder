@@ -1,6 +1,9 @@
 package ai.rever.boss.plugin.dynamic.rparecorder
 
+import ai.rever.boss.plugin.api.ActiveTabData
 import ai.rever.boss.plugin.api.ActiveTabsProvider
+import ai.rever.boss.plugin.api.BrowserIntegration
+import ai.rever.boss.plugin.api.FileSystemDataProvider
 import ai.rever.boss.plugin.api.PanelComponentWithUI
 import ai.rever.boss.plugin.api.PanelInfo
 import ai.rever.boss.plugin.browser.BrowserService
@@ -9,11 +12,14 @@ import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.doOnDestroy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlin.time.Clock
@@ -28,7 +34,8 @@ class RparecorderComponent(
     ctx: ComponentContext,
     override val panelInfo: PanelInfo,
     private val browserService: BrowserService? = null,
-    private val activeTabsProvider: ActiveTabsProvider? = null
+    private val activeTabsProvider: ActiveTabsProvider? = null,
+    private val fileSystemDataProvider: FileSystemDataProvider? = null
 ) : PanelComponentWithUI, ComponentContext by ctx {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -80,11 +87,31 @@ class RparecorderComponent(
     private val _editingActionIndex = MutableStateFlow<Int?>(null)
     val editingActionIndex: StateFlow<Int?> = _editingActionIndex.asStateFlow()
 
+    // Browser tab selection
+    private val _availableTabs = MutableStateFlow<List<BrowserTabInfo>>(emptyList())
+    val availableTabs: StateFlow<List<BrowserTabInfo>> = _availableTabs.asStateFlow()
+
+    private val _selectedTab = MutableStateFlow<BrowserTabInfo?>(null)
+    val selectedTab: StateFlow<BrowserTabInfo?> = _selectedTab.asStateFlow()
+
+    private val _isConnected = MutableStateFlow(false)
+    val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
+
+    // Browser integration for capturing actions
+    private var browserIntegration: BrowserIntegration? = null
+    private var tabPollingJob: Job? = null
+    private var actionPollingJob: Job? = null
+
     // Browser service availability
     val hasBrowserService: Boolean get() = browserService != null
 
+    // Active tabs provider availability
+    val hasActiveTabsProvider: Boolean get() = activeTabsProvider != null
+
     init {
         lifecycle.doOnDestroy {
+            tabPollingJob?.cancel()
+            actionPollingJob?.cancel()
             scope.cancel()
         }
 
@@ -100,11 +127,98 @@ class RparecorderComponent(
                 ViewMode.CLEAN
             }
         }
+
+        // Start polling for available browser tabs
+        startTabPolling()
     }
 
     @Composable
     override fun Content() {
         RparecorderContent(this)
+    }
+
+    /**
+     * Start polling for available browser tabs
+     */
+    private fun startTabPolling() {
+        if (activeTabsProvider == null) return
+
+        tabPollingJob = scope.launch {
+            while (isActive) {
+                try {
+                    val apiTabs = activeTabsProvider.activeTabs.value
+                    val browserTabs = apiTabs
+                        .filter { it.typeId.contains("fluck", ignoreCase = true) }
+                        .map { tab ->
+                            BrowserTabInfo(
+                                id = tab.tabId,
+                                title = tab.title,
+                                url = tab.url ?: ""
+                            )
+                        }
+                    _availableTabs.value = browserTabs
+
+                    // Auto-select first tab if none selected
+                    if (_selectedTab.value == null && browserTabs.isNotEmpty()) {
+                        selectTab(browserTabs.first())
+                    }
+
+                    // Clear selected tab if it no longer exists
+                    val currentSelected = _selectedTab.value
+                    if (currentSelected != null && browserTabs.none { it.id == currentSelected.id }) {
+                        _selectedTab.value = null
+                        _isConnected.value = false
+                        browserIntegration = null
+                    }
+                } catch (e: Exception) {
+                    // Ignore polling errors
+                }
+                delay(1000)
+            }
+        }
+    }
+
+    /**
+     * Select a browser tab to record from
+     */
+    fun selectTab(tab: BrowserTabInfo) {
+        _selectedTab.value = tab
+        _currentUrl.value = tab.url
+
+        // Try to get browser integration for this tab
+        updateBrowserConnection(tab)
+    }
+
+    /**
+     * Update browser connection for selected tab
+     */
+    private fun updateBrowserConnection(tab: BrowserTabInfo) {
+        if (activeTabsProvider == null) {
+            _isConnected.value = false
+            return
+        }
+
+        scope.launch {
+            try {
+                val integration = activeTabsProvider.getBrowserIntegration(tab.id)
+                if (integration != null && integration.isBrowserAvailable()) {
+                    browserIntegration = integration
+                    _isConnected.value = true
+
+                    // Update current URL from browser
+                    val url = integration.getCurrentUrl()
+                    if (!url.isNullOrEmpty()) {
+                        _currentUrl.value = url
+                    }
+                } else {
+                    browserIntegration = null
+                    _isConnected.value = false
+                }
+            } catch (e: Exception) {
+                browserIntegration = null
+                _isConnected.value = false
+            }
+        }
     }
 
     /**
@@ -124,9 +238,34 @@ class RparecorderComponent(
     private fun startRecording() {
         _recordingState.value = RecordingState.RECORDING
 
-        if (browserService != null) {
-            // TODO: When browser integration is available, inject event listeners
-            showFeedback("Recording started - browser integration active", FeedbackType.SUCCESS)
+        val browser = browserIntegration
+        if (browser != null && browser.isBrowserAvailable()) {
+            // Inject event capture script and start polling
+            scope.launch {
+                try {
+                    injectEventCaptureScript(browser)
+                    startActionPolling(browser)
+
+                    // Add initial navigation action
+                    val url = browser.getCurrentUrl()
+                    if (!url.isNullOrEmpty() && url != "about:blank") {
+                        addAction(RecordedAction(
+                            type = ActionTypes.NAVIGATE,
+                            selector = SelectorInfo(type = SelectorTypes.NONE, value = null),
+                            value = url,
+                            url = url
+                        ))
+                    }
+
+                    showFeedback("Recording started - capturing browser actions", FeedbackType.SUCCESS)
+                } catch (e: Exception) {
+                    showFeedback("Recording started - browser capture failed, add actions manually", FeedbackType.WARNING)
+                }
+            }
+        } else if (activeTabsProvider != null && _selectedTab.value != null) {
+            // Try to reconnect to browser
+            updateBrowserConnection(_selectedTab.value!!)
+            showFeedback("Recording mode active - connecting to browser...", FeedbackType.INFO)
         } else {
             showFeedback("Recording mode active - add actions manually", FeedbackType.INFO)
         }
@@ -136,8 +275,147 @@ class RparecorderComponent(
      * Stop recording
      */
     private fun stopRecording() {
+        actionPollingJob?.cancel()
+        actionPollingJob = null
         _recordingState.value = RecordingState.IDLE
         showFeedback("Recording stopped", FeedbackType.INFO)
+    }
+
+    /**
+     * Inject event capture script into browser
+     */
+    private suspend fun injectEventCaptureScript(browser: BrowserIntegration) {
+        // Event capture script that records user interactions
+        val script = """
+            (function() {
+                if (window.__rpaRecorderInjected) return;
+                window.__rpaRecorderInjected = true;
+                window.__rpaRecordedActions = [];
+
+                function getSelector(element) {
+                    if (element.id) {
+                        return { type: 'id', value: element.id, isUnique: true };
+                    }
+
+                    // Try to build a CSS selector
+                    let path = [];
+                    let current = element;
+                    while (current && current.nodeType === Node.ELEMENT_NODE) {
+                        let selector = current.tagName.toLowerCase();
+                        if (current.className && typeof current.className === 'string') {
+                            const classes = current.className.trim().split(/\s+/).filter(c => c && !c.includes(':'));
+                            if (classes.length > 0) {
+                                selector += '.' + classes.slice(0, 2).join('.');
+                            }
+                        }
+                        path.unshift(selector);
+                        if (path.length > 3) break;
+                        current = current.parentElement;
+                    }
+                    return { type: 'css', value: path.join(' > '), isUnique: null };
+                }
+
+                function recordAction(type, element, value) {
+                    const action = {
+                        type: type,
+                        selector: getSelector(element),
+                        value: value || null,
+                        timestamp: Date.now(),
+                        elementText: element.textContent ? element.textContent.substring(0, 100).trim() : null,
+                        url: window.location.href,
+                        elementType: element.tagName.toLowerCase()
+                    };
+                    window.__rpaRecordedActions.push(JSON.stringify(action));
+                }
+
+                // Record clicks
+                document.addEventListener('click', function(e) {
+                    recordAction('click', e.target, null);
+                }, true);
+
+                // Record input changes
+                document.addEventListener('change', function(e) {
+                    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                        recordAction('input', e.target, e.target.value);
+                    } else if (e.target.tagName === 'SELECT') {
+                        recordAction('select', e.target, e.target.value);
+                    }
+                }, true);
+
+                // Record input on blur for text inputs
+                document.addEventListener('blur', function(e) {
+                    if ((e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') && e.target.value) {
+                        recordAction('input', e.target, e.target.value);
+                    }
+                }, true);
+
+                console.log('RPA Recorder: Event capture script injected');
+            })();
+        """.trimIndent()
+
+        browser.executeJavaScript(script)
+    }
+
+    /**
+     * Start polling for recorded actions from browser
+     */
+    private fun startActionPolling(browser: BrowserIntegration) {
+        actionPollingJob?.cancel()
+        actionPollingJob = scope.launch {
+            var lastUrl = _currentUrl.value
+
+            while (isActive && _recordingState.value == RecordingState.RECORDING) {
+                try {
+                    if (!browser.isBrowserAvailable()) {
+                        _isConnected.value = false
+                        break
+                    }
+
+                    // Check for URL change (navigation)
+                    val currentUrl = browser.getCurrentUrl() ?: ""
+                    if (currentUrl != lastUrl && currentUrl.isNotEmpty() && currentUrl != "about:blank") {
+                        lastUrl = currentUrl
+                        _currentUrl.value = currentUrl
+
+                        // Re-inject script after navigation
+                        delay(500)
+                        if (browser.isBrowserAvailable()) {
+                            injectEventCaptureScript(browser)
+                        }
+                    }
+
+                    // Retrieve recorded actions
+                    val result = browser.executeJavaScript("""
+                        (function() {
+                            const actions = window.__rpaRecordedActions || [];
+                            window.__rpaRecordedActions = [];
+                            return JSON.stringify(actions);
+                        })();
+                    """.trimIndent())
+
+                    val actionsJson = result as? String
+                    if (!actionsJson.isNullOrEmpty() && actionsJson != "[]") {
+                        try {
+                            val actionsList = json.decodeFromString<List<String>>(actionsJson)
+                            actionsList.forEach { actionJson ->
+                                try {
+                                    val action = json.decodeFromString<RecordedAction>(actionJson)
+                                    addAction(action)
+                                } catch (e: Exception) {
+                                    // Ignore parse errors for individual actions
+                                }
+                            }
+                        } catch (e: Exception) {
+                            // Ignore parse errors
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Ignore polling errors
+                }
+
+                delay(100) // Poll every 100ms
+            }
+        }
     }
 
     /**
@@ -594,16 +872,36 @@ class RparecorderComponent(
             val config = generateConfiguration()
             val timestamp = Clock.System.now().toEpochMilliseconds()
             val filename = "rpa_${sanitizeFilename(_configurationName.value)}_$timestamp.json"
-            val exportDir = settingsManager.getDefaultExportDir()
-            val filePath = "${exportDir.absolutePath}/$filename"
 
-            val success = settingsManager.exportConfiguration(config, filePath)
+            // Use FileSystemDataProvider if available (sandbox-safe), otherwise fallback to direct file access
+            val provider = fileSystemDataProvider
+            if (provider != null) {
+                val downloadsDir = provider.getDownloadsDirectory()
+                val filePath = "$downloadsDir/$filename"
+                val jsonContent = json.encodeToString(RpaConfiguration.serializer(), config)
 
-            if (success) {
-                val actionCount = config.actions.size
-                showFeedback("Exported $actionCount actions to Downloads", FeedbackType.SUCCESS)
+                val result = provider.writeFile(filePath, jsonContent)
+                if (result.isSuccess) {
+                    val actionCount = config.actions.size
+                    showFeedback("Exported $actionCount actions to Downloads", FeedbackType.SUCCESS)
+                    // Reveal in file manager
+                    provider.revealInFileManager(filePath)
+                } else {
+                    showFeedback("Failed to export: ${result.exceptionOrNull()?.message}", FeedbackType.ERROR)
+                }
             } else {
-                showFeedback("Failed to export configuration", FeedbackType.ERROR)
+                // Fallback to direct file access (may not work in sandbox)
+                val exportDir = settingsManager.getDefaultExportDir()
+                val filePath = "${exportDir.absolutePath}/$filename"
+
+                val success = settingsManager.exportConfiguration(config, filePath)
+
+                if (success) {
+                    val actionCount = config.actions.size
+                    showFeedback("Exported $actionCount actions to Downloads", FeedbackType.SUCCESS)
+                } else {
+                    showFeedback("Failed to export configuration", FeedbackType.ERROR)
+                }
             }
         }
     }

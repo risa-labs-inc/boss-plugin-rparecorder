@@ -42,6 +42,11 @@ fun RparecorderContent(component: RparecorderComponent) {
         val savedConfigurations by component.savedConfigurations.collectAsState()
         val configName by component.configurationName.collectAsState()
 
+        // Browser tab selection state
+        val availableTabs by component.availableTabs.collectAsState()
+        val selectedTab by component.selectedTab.collectAsState()
+        val isConnected by component.isConnected.collectAsState()
+
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colors.background
@@ -55,6 +60,10 @@ fun RparecorderContent(component: RparecorderComponent) {
                 HeaderSection(
                     recordingState = recordingState,
                     hasActions = recordedActions.isNotEmpty(),
+                    availableTabs = availableTabs,
+                    selectedTab = selectedTab,
+                    isConnected = isConnected,
+                    onTabSelected = { component.selectTab(it) },
                     onToggleRecording = { component.toggleRecording() },
                     onPause = { component.pauseRecording() },
                     onClear = { component.clearRecording() },
@@ -86,9 +95,7 @@ fun RparecorderContent(component: RparecorderComponent) {
                     selectedIndices = selectedIndices,
                     onToggleSelection = { component.toggleActionSelection(it) },
                     onRemove = { component.removeAction(it) },
-                    onEdit = { index, action -> component.editAction(index, action) },
-                    onMoveUp = { component.moveActionUp(it) },
-                    onMoveDown = { component.moveActionDown(it) }
+                    onEdit = { index, action -> component.editAction(index, action) }
                 )
 
                 // Feedback message
@@ -133,10 +140,17 @@ fun RparecorderContent(component: RparecorderComponent) {
     }
 }
 
+/**
+ * Compact header matching the bundled RPA Recorder design
+ */
 @Composable
 private fun HeaderSection(
     recordingState: RecordingState,
     hasActions: Boolean,
+    availableTabs: List<BrowserTabInfo>,
+    selectedTab: BrowserTabInfo?,
+    isConnected: Boolean,
+    onTabSelected: (BrowserTabInfo) -> Unit,
     onToggleRecording: () -> Unit,
     onPause: () -> Unit,
     onClear: () -> Unit,
@@ -147,6 +161,7 @@ private fun HeaderSection(
 ) {
     val isRecording = recordingState == RecordingState.RECORDING
     val isPaused = recordingState == RecordingState.PAUSED
+    var dropdownExpanded by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -168,146 +183,253 @@ private fun HeaderSection(
                     Icon(
                         Icons.Default.PlayCircle,
                         contentDescription = "RPA Recorder",
-                        modifier = Modifier.size(24.dp),
+                        modifier = Modifier.size(20.dp),
                         tint = if (isRecording) Color(0xFFD32F2F) else MaterialTheme.colors.primary
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         "RPA Recorder",
-                        style = MaterialTheme.typography.h6,
+                        style = MaterialTheme.typography.subtitle1,
                         fontWeight = FontWeight.Medium
                     )
                 }
 
-                if (isRecording || isPaused) {
+                if (isRecording) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Recording indicator
                         Surface(
                             modifier = Modifier.size(8.dp),
                             shape = CircleShape,
-                            color = if (isPaused) Color(0xFFFF9800) else Color(0xFFD32F2F)
+                            color = Color(0xFFD32F2F)
                         ) {}
-                        Text(
-                            text = if (isPaused) "Paused" else "Recording",
-                            style = MaterialTheme.typography.caption,
-                            color = if (isPaused) Color(0xFFFF9800) else Color(0xFFD32F2F)
-                        )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // Control buttons row
+            // Controls row with dropdown and buttons (matching bundled design)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Record/Stop button
-                Button(
-                    onClick = onToggleRecording,
-                    colors = ButtonDefaults.buttonColors(
-                        backgroundColor = if (isRecording || isPaused)
-                            Color(0xFFD32F2F)
-                        else
-                            MaterialTheme.colors.primary
-                    ),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(
-                        if (isRecording || isPaused) Icons.Default.Stop else Icons.Default.FiberManualRecord,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(if (isRecording || isPaused) "Stop" else "Record")
+                // Tab selection dropdown (takes most space)
+                Box(modifier = Modifier.weight(1f)) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(32.dp)
+                            .clickable(
+                                enabled = !isRecording && availableTabs.isNotEmpty()
+                            ) {
+                                dropdownExpanded = true
+                            },
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colors.surface,
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (selectedTab != null && !isRecording)
+                                MaterialTheme.colors.primary.copy(alpha = 0.5f)
+                            else
+                                MaterialTheme.colors.onSurface.copy(alpha = 0.3f)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Language,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = if (selectedTab != null)
+                                    MaterialTheme.colors.primary
+                                else
+                                    MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                            )
+
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            Text(
+                                text = selectedTab?.title ?: if (availableTabs.isEmpty())
+                                    "No tabs"
+                                else
+                                    "Select tab...",
+                                style = MaterialTheme.typography.body2,
+                                color = if (selectedTab != null)
+                                    MaterialTheme.colors.onSurface
+                                else
+                                    MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            Icon(
+                                if (dropdownExpanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
+                                contentDescription = "Dropdown",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                            )
+                        }
+                    }
+
+                    DropdownMenu(
+                        expanded = dropdownExpanded && availableTabs.isNotEmpty(),
+                        onDismissRequest = { dropdownExpanded = false }
+                    ) {
+                        availableTabs.forEach { tab ->
+                            DropdownMenuItem(
+                                onClick = {
+                                    onTabSelected(tab)
+                                    dropdownExpanded = false
+                                }
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Language,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = if (selectedTab?.id == tab.id)
+                                            MaterialTheme.colors.primary
+                                        else
+                                            MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            tab.title,
+                                            style = MaterialTheme.typography.body2,
+                                            fontWeight = if (selectedTab?.id == tab.id) FontWeight.Medium else FontWeight.Normal,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            tab.url,
+                                            style = MaterialTheme.typography.caption,
+                                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    if (selectedTab?.id == tab.id) {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colors.primary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
-                // Pause button (only when recording)
-                if (isRecording) {
+                // Record/Stop button - icon only for compactness
+                Surface(
+                    modifier = Modifier.size(32.dp),
+                    shape = RoundedCornerShape(4.dp),
+                    color = if (isRecording)
+                        Color(0xFFD32F2F)
+                    else if (selectedTab != null)
+                        MaterialTheme.colors.primary
+                    else
+                        MaterialTheme.colors.onSurface.copy(alpha = 0.3f),
+                    elevation = if (isRecording) 4.dp else 2.dp
+                ) {
                     IconButton(
-                        onClick = onPause,
-                        modifier = Modifier.size(40.dp)
+                        onClick = onToggleRecording,
+                        enabled = selectedTab != null || isRecording,
+                        modifier = Modifier.fillMaxSize()
                     ) {
                         Icon(
-                            Icons.Default.Pause,
-                            contentDescription = "Pause",
-                            tint = Color(0xFFFF9800)
+                            imageVector = if (isRecording)
+                                Icons.Default.Stop
+                            else
+                                Icons.Default.FiberManualRecord,
+                            contentDescription = if (isRecording) "Stop Recording" else "Start Recording",
+                            modifier = Modifier.size(18.dp),
+                            tint = Color.White
                         )
                     }
                 }
 
-                // Add action button
+                // Clear button
                 IconButton(
-                    onClick = onAddAction,
-                    modifier = Modifier.size(40.dp)
+                    onClick = onClear,
+                    enabled = !isRecording && hasActions,
+                    modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
-                        Icons.Default.Add,
-                        contentDescription = "Add Action",
-                        tint = MaterialTheme.colors.primary
-                    )
-                }
-
-                // Save button
-                IconButton(
-                    onClick = onSave,
-                    enabled = hasActions,
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Save,
-                        contentDescription = "Save",
-                        tint = if (hasActions) MaterialTheme.colors.primary
-                        else MaterialTheme.colors.onSurface.copy(alpha = 0.3f)
-                    )
-                }
-
-                // Load button
-                IconButton(
-                    onClick = onLoad,
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        Icons.Default.FolderOpen,
-                        contentDescription = "Load",
-                        tint = MaterialTheme.colors.primary
+                        Icons.Default.Clear,
+                        contentDescription = "Clear",
+                        tint = if (!isRecording && hasActions)
+                            MaterialTheme.colors.error
+                        else
+                            MaterialTheme.colors.onSurface.copy(alpha = 0.3f),
+                        modifier = Modifier.size(18.dp)
                     )
                 }
 
                 // Export button
                 IconButton(
                     onClick = onExport,
-                    enabled = hasActions,
-                    modifier = Modifier.size(40.dp)
+                    enabled = !isRecording && hasActions,
+                    modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
                         Icons.Default.Download,
                         contentDescription = "Export",
-                        tint = if (hasActions) MaterialTheme.colors.primary
-                        else MaterialTheme.colors.onSurface.copy(alpha = 0.3f)
-                    )
-                }
-
-                // Clear button
-                IconButton(
-                    onClick = onClear,
-                    enabled = hasActions,
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Clear,
-                        contentDescription = "Clear",
-                        tint = if (hasActions) MaterialTheme.colors.error
-                        else MaterialTheme.colors.onSurface.copy(alpha = 0.3f)
+                        tint = if (!isRecording && hasActions)
+                            MaterialTheme.colors.primary
+                        else
+                            MaterialTheme.colors.onSurface.copy(alpha = 0.3f),
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
         }
     }
+
+    // Connection status bar (shown when recording but not connected)
+    if (isRecording && !isConnected) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = Color(0xFFFF9800),
+            shape = RoundedCornerShape(4.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = Color.White
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "No browser connection - Open a Fluck tab",
+                    style = MaterialTheme.typography.caption,
+                    color = Color.White
+                )
+            }
+        }
+    }
 }
+
 
 @Composable
 private fun ActionControlsSection(
@@ -318,7 +440,8 @@ private fun ActionControlsSection(
     onViewModeChange: (ViewMode) -> Unit,
     onSelectAll: () -> Unit,
     onClearSelection: () -> Unit,
-    onDeleteSelected: () -> Unit
+    onDeleteSelected: () -> Unit,
+    onRefresh: () -> Unit = {}
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -327,6 +450,7 @@ private fun ActionControlsSection(
         elevation = 1.dp
     ) {
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            // View mode selector and stats
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -335,17 +459,33 @@ private fun ActionControlsSection(
                 // View mode tabs
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     ViewMode.values().forEach { mode ->
-                        ViewModeChip(
-                            mode = mode,
-                            isSelected = viewMode == mode,
-                            onClick = { onViewModeChange(mode) }
-                        )
+                        Surface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable { onViewModeChange(mode) }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            shape = RoundedCornerShape(4.dp),
+                            color = if (viewMode == mode)
+                                MaterialTheme.colors.primary.copy(alpha = 0.2f)
+                            else
+                                Color.Transparent
+                        ) {
+                            Text(
+                                text = mode.name.lowercase().replaceFirstChar { it.uppercase() },
+                                style = MaterialTheme.typography.caption,
+                                fontWeight = if (viewMode == mode) FontWeight.Bold else FontWeight.Normal,
+                                color = if (viewMode == mode)
+                                    MaterialTheme.colors.primary
+                                else
+                                    MaterialTheme.colors.onSurface.copy(alpha = 0.7f)
+                            )
+                        }
                     }
                 }
 
-                // Stats
+                // Action stats
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (selectedCount > 0) {
@@ -370,10 +510,23 @@ private fun ActionControlsSection(
                         style = MaterialTheme.typography.caption,
                         color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
                     )
+
+                    // Refresh button
+                    IconButton(
+                        onClick = onRefresh,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = "Refresh",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colors.primary
+                        )
+                    }
                 }
             }
 
-            // Selection controls
+            // Selection controls (shown when items exist)
             if (totalActions > 0) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -391,16 +544,6 @@ private fun ActionControlsSection(
                         ) {
                             Text("Clear Selection", style = MaterialTheme.typography.caption)
                         }
-
-                        TextButton(
-                            onClick = onDeleteSelected,
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                            colors = ButtonDefaults.textButtonColors(
-                                contentColor = MaterialTheme.colors.error
-                            )
-                        ) {
-                            Text("Delete Selected", style = MaterialTheme.typography.caption)
-                        }
                     }
                 }
             }
@@ -408,34 +551,6 @@ private fun ActionControlsSection(
     }
 }
 
-@Composable
-private fun ViewModeChip(
-    mode: ViewMode,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    Surface(
-        modifier = Modifier
-            .clip(RoundedCornerShape(4.dp))
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(4.dp),
-        color = if (isSelected)
-            MaterialTheme.colors.primary.copy(alpha = 0.2f)
-        else
-            Color.Transparent
-    ) {
-        Text(
-            text = mode.name.lowercase().replaceFirstChar { it.uppercase() },
-            style = MaterialTheme.typography.caption,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-            color = if (isSelected)
-                MaterialTheme.colors.primary
-            else
-                MaterialTheme.colors.onSurface.copy(alpha = 0.7f),
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-        )
-    }
-}
 
 @Composable
 private fun ActionsListSection(
@@ -443,9 +558,7 @@ private fun ActionsListSection(
     selectedIndices: Set<Int>,
     onToggleSelection: (Int) -> Unit,
     onRemove: (Int) -> Unit,
-    onEdit: (Int, RecordedAction) -> Unit,
-    onMoveUp: (Int) -> Unit,
-    onMoveDown: (Int) -> Unit
+    onEdit: (Int, RecordedAction) -> Unit
 ) {
     if (actions.isEmpty()) {
         EmptyStateCard()
@@ -459,13 +572,9 @@ private fun ActionsListSection(
                     action = action,
                     index = index,
                     isSelected = selectedIndices.contains(index),
-                    isFirst = index == 0,
-                    isLast = index == actions.size - 1,
                     onToggleSelection = { onToggleSelection(index) },
                     onRemove = { onRemove(index) },
-                    onEdit = { onEdit(index, it) },
-                    onMoveUp = { onMoveUp(index) },
-                    onMoveDown = { onMoveDown(index) }
+                    onEdit = { onEdit(index, it) }
                 )
             }
         }
@@ -475,10 +584,13 @@ private fun ActionsListSection(
 @Composable
 private fun EmptyStateCard() {
     Card(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(vertical = 24.dp),
         shape = RoundedCornerShape(12.dp),
         backgroundColor = MaterialTheme.colors.surface,
-        elevation = 0.dp
+        elevation = 0.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colors.onSurface.copy(alpha = 0.1f))
     ) {
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -519,7 +631,7 @@ private fun EmptyStateCard() {
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    "Click Record to start or Add to create actions manually",
+                    "Select a browser tab and click Start Recording",
                     style = MaterialTheme.typography.body2,
                     color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
                     textAlign = TextAlign.Center
@@ -528,7 +640,7 @@ private fun EmptyStateCard() {
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    "Load saved configurations to continue previous work",
+                    "All your interactions will be captured automatically",
                     style = MaterialTheme.typography.caption,
                     color = MaterialTheme.colors.onSurface.copy(alpha = 0.5f),
                     textAlign = TextAlign.Center
@@ -543,13 +655,9 @@ private fun ActionItemCard(
     action: RecordedAction,
     index: Int,
     isSelected: Boolean,
-    isFirst: Boolean,
-    isLast: Boolean,
     onToggleSelection: () -> Unit,
     onRemove: () -> Unit,
-    onEdit: (RecordedAction) -> Unit,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit
+    onEdit: (RecordedAction) -> Unit
 ) {
     var isEditing by remember { mutableStateOf(false) }
     var editedValue by remember { mutableStateOf(action.value ?: "") }
@@ -651,39 +759,7 @@ private fun ActionItemCard(
                 }
 
                 // Action buttons
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    // Move up
-                    IconButton(
-                        onClick = onMoveUp,
-                        enabled = !isFirst,
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.KeyboardArrowUp,
-                            contentDescription = "Move Up",
-                            modifier = Modifier.size(16.dp),
-                            tint = if (!isFirst) MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
-                            else MaterialTheme.colors.onSurface.copy(alpha = 0.2f)
-                        )
-                    }
-
-                    // Move down
-                    IconButton(
-                        onClick = onMoveDown,
-                        enabled = !isLast,
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.KeyboardArrowDown,
-                            contentDescription = "Move Down",
-                            modifier = Modifier.size(16.dp),
-                            tint = if (!isLast) MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
-                            else MaterialTheme.colors.onSurface.copy(alpha = 0.2f)
-                        )
-                    }
-
+                Row {
                     // Edit (for input/select actions)
                     if (action.type in listOf(ActionTypes.INPUT, ActionTypes.SELECT, ActionTypes.WAIT)) {
                         IconButton(
@@ -695,13 +771,13 @@ private fun ActionItemCard(
                                     isEditing = true
                                 }
                             },
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.size(32.dp)
                         ) {
                             Icon(
                                 if (isEditing) Icons.Default.Check else Icons.Default.Edit,
                                 contentDescription = if (isEditing) "Save" else "Edit",
                                 modifier = Modifier.size(16.dp),
-                                tint = if (isEditing) Color.Green else MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                                tint = if (isEditing) Color.Green else MaterialTheme.colors.onSurface
                             )
                         }
                     }
@@ -709,7 +785,7 @@ private fun ActionItemCard(
                     // Delete
                     IconButton(
                         onClick = onRemove,
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
                             Icons.Default.Delete,
