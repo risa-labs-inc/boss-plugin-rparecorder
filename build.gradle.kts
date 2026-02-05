@@ -57,7 +57,8 @@ dependencies {
         implementation(":plugin-api-browser-desktop-1.0.4")
     } else {
         // Use Maven Central for CI/CD and production
-        implementation("com.risaboss:plugin-api-desktop:1.0.5")
+        implementation("com.risaboss:plugin-api-desktop:1.0.9")
+        implementation("com.risaboss:plugin-api-browser-desktop:1.0.4")
         implementation("com.risaboss:plugin-ui-core-desktop:1.0.4")
         implementation("com.risaboss:plugin-scrollbar-desktop:1.0.4")
     }
