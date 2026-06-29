@@ -1,6 +1,7 @@
 package ai.rever.boss.plugin.dynamic.rparecorder
 
 import ai.rever.boss.plugin.ui.BossTheme
+import ai.rever.boss.plugin.ui.BossThemeColors
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -406,7 +407,7 @@ private fun HeaderSection(
         Spacer(modifier = Modifier.height(8.dp))
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            color = Color(0xFFFF9800),
+            color = BossThemeColors.WarningColor,
             shape = RoundedCornerShape(4.dp)
         ) {
             Row(
@@ -841,10 +842,10 @@ private fun FeedbackBar(
     onDismiss: () -> Unit
 ) {
     val (bgColor, iconTint) = when (message.type) {
-        FeedbackType.SUCCESS -> Color(0xFF4CAF50) to Color.White
+        FeedbackType.SUCCESS -> BossThemeColors.SuccessColor to Color.White
         FeedbackType.INFO -> MaterialTheme.colors.primary to Color.White
-        FeedbackType.WARNING -> Color(0xFFFF9800) to Color.White
-        FeedbackType.ERROR -> Color(0xFFD32F2F) to Color.White
+        FeedbackType.WARNING -> BossThemeColors.WarningColor to Color.White
+        FeedbackType.ERROR -> BossThemeColors.ErrorColor to Color.White
     }
 
     Surface(
