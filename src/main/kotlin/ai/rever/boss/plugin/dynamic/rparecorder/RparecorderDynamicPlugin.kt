@@ -17,6 +17,10 @@ class RparecorderDynamicPlugin : DynamicPlugin {
     override val author: String = "Risa Labs"
     override val url: String = "https://github.com/risa-labs-inc/boss-plugin-rparecorder"
 
+    // Most recently created panel component, so MCP tools can drive the recorder.
+    @Volatile
+    private var lastComponent: RparecorderComponent? = null
+
     override fun register(context: PluginContext) {
         val browserService = context.browserService
         val activeTabsProvider = context.activeTabsProvider
@@ -29,7 +33,14 @@ class RparecorderDynamicPlugin : DynamicPlugin {
                 browserService = browserService,
                 activeTabsProvider = activeTabsProvider,
                 fileSystemDataProvider = fileSystemDataProvider
-            )
+            ).also { lastComponent = it }
         }
+
+        // Contribute rpa_record_status/toggle/clear MCP tools; auto-removed on disable/unload.
+        context.registerMcpToolProvider(RparecorderMcpToolProvider(pluginId) { lastComponent })
+    }
+
+    override fun dispose() {
+        lastComponent = null
     }
 }
