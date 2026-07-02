@@ -2,6 +2,7 @@ package ai.rever.boss.plugin.dynamic.rparecorder
 
 import ai.rever.boss.plugin.api.DynamicPlugin
 import ai.rever.boss.plugin.api.PluginContext
+import com.arkivanov.essenty.lifecycle.doOnDestroy
 
 /**
  * RPA Recorder dynamic plugin - Loaded from external JAR.
@@ -17,6 +18,10 @@ class RparecorderDynamicPlugin : DynamicPlugin {
     override val author: String = "Risa Labs"
     override val url: String = "https://github.com/risa-labs-inc/boss-plugin-rparecorder"
 
+    // Most recently created panel component, so MCP tools can drive the recorder.
+    @Volatile
+    private var lastComponent: RparecorderComponent? = null
+
     override fun register(context: PluginContext) {
         val browserService = context.browserService
         val activeTabsProvider = context.activeTabsProvider
@@ -29,7 +34,19 @@ class RparecorderDynamicPlugin : DynamicPlugin {
                 browserService = browserService,
                 activeTabsProvider = activeTabsProvider,
                 fileSystemDataProvider = fileSystemDataProvider
-            )
+            ).also { comp ->
+                lastComponent = comp
+                // Clear on panel close: a destroyed component's scope is cancelled,
+                // so MCP tools driving it would silently no-op with false success.
+                ctx.lifecycle.doOnDestroy { if (lastComponent === comp) lastComponent = null }
+            }
         }
+
+        // Contribute rpa_record_status/toggle/clear MCP tools; auto-removed on disable/unload.
+        context.registerMcpToolProvider(RparecorderMcpToolProvider(pluginId) { lastComponent })
+    }
+
+    override fun dispose() {
+        lastComponent = null
     }
 }
