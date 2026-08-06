@@ -1,5 +1,6 @@
 package ai.rever.boss.plugin.dynamic.rparecorder
 
+import ai.rever.boss.plugin.ui.BossDialog
 import ai.rever.boss.plugin.ui.BossTheme
 import ai.rever.boss.plugin.ui.BossThemeColors
 import androidx.compose.foundation.background
@@ -24,7 +25,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 
 /**
  * Main content for RPA Recorder panel
@@ -901,7 +901,7 @@ private fun AddActionDialog(
     var actionValue by remember { mutableStateOf("") }
     var elementText by remember { mutableStateOf("") }
 
-    Dialog(onDismissRequest = onDismiss) {
+    BossDialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             shape = RoundedCornerShape(12.dp),
@@ -1110,7 +1110,7 @@ private fun SaveConfigurationDialog(
     var name by remember { mutableStateOf(currentName) }
     var description by remember { mutableStateOf("") }
 
-    Dialog(onDismissRequest = onDismiss) {
+    BossDialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             shape = RoundedCornerShape(12.dp),
@@ -1172,7 +1172,7 @@ private fun LoadConfigurationDialog(
     onLoad: (String) -> Unit,
     onDelete: (String) -> Unit
 ) {
-    Dialog(onDismissRequest = onDismiss) {
+    BossDialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             shape = RoundedCornerShape(12.dp),
